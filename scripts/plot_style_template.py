@@ -11,9 +11,9 @@ Academic Publication Plot Style Generator
    从「调色板」章节提取十六进制色值，形成 蒸馏 -> 绘图 的闭环。
 
 用法示例：
-    # 内置色板
-    python3 plot_style_template.py --palette morandi --output out.png
-    # 由学者档案驱动（优先于 --palette）
+    # 内置色板（matplotlib_classic ≈ 2024+ 当前主流风格：红色 Ours 实线 + 基线退后）
+    python3 plot_style_template.py --palette matplotlib_classic --output out.png
+    # 由学者档案驱动（优先于 --palette）：按角色关键词提取（Ours/主色 -> ours，基线 -> baseline，灰 -> gray）
     python3 plot_style_template.py --from-profile ../examples/kaiming_he_profile.md --output out.pdf
 """
 
@@ -35,6 +35,7 @@ PALETTES = {
         "ours": "#1F77B4",        # 科技蓝 (Ours)
         "baseline1": "#FF7F0E",   # 复古橙
         "baseline2": "#2CA02C",   # 沉稳绿
+        "baseline3": "#9467BD",   # 紫
         "gray": "#7F7F7F",        # 中性灰
         "light_gray": "#E0E0E0"
     },
@@ -42,6 +43,7 @@ PALETTES = {
         "ours": "#2A9D8F",        # 优雅孔雀青
         "baseline1": "#E76F51",   # 陶土红
         "baseline2": "#F4A261",   # 暖沙金
+        "baseline3": "#6A4C93",   # 紫
         "gray": "#4A5568",
         "light_gray": "#EDF2F7"
     },
@@ -49,13 +51,22 @@ PALETTES = {
         "ours": "#4A6FA5",        # 莫兰迪灰蓝
         "baseline1": "#B85B5B",   # 莫兰迪干枯玫瑰
         "baseline2": "#6C8E74",   # 莫兰迪浅草绿
+        "baseline3": "#8A817C",   # 莫兰迪暖灰
         "gray": "#7F7F7F",        # 中性灰
         "light_gray": "#E0E0E0"
-    }
+    },
+    "matplotlib_classic": {
+        "ours": "#D62728",        # 红 (Ours 实线，2024+ 主流风格)
+        "baseline1": "#1F77B4",   # 蓝（虚线退后）
+        "baseline2": "#2CA02C",   # 绿
+        "baseline3": "#9467BD",   # 紫
+        "gray": "#7F7F7F",        # 中性灰（注释箭头）
+        "light_gray": "#E0E0E0"
+    },
 }
 
 # 从档案中提取的色值按出现顺序依次映射到这些角色
-PROFILE_COLOR_ROLES = ["ours", "baseline1", "baseline2", "gray"]
+PROFILE_COLOR_ROLES = ["ours", "baseline1", "baseline2", "baseline3", "gray"]
 
 # 匹配十六进制色值，如 #1F77B4
 HEX_COLOR_RE = re.compile(r"#[0-9A-Fa-f]{6}\b")
@@ -63,6 +74,13 @@ HEX_COLOR_RE = re.compile(r"#[0-9A-Fa-f]{6}\b")
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 # 「调色板」章节的标题/段落特征
 PALETTE_SECTION_RE = re.compile(r"调色板|Palette", re.IGNORECASE)
+# 角色 -> 行内关键词：调色板章节里一行色值归属哪个角色，由行内关键词决定
+# （顺序即优先级：ours 优先于 baseline 优先于 gray）
+ROLE_LINE_KEYWORDS = [
+    ("ours", re.compile(r"ours|主色|主体|our method|our model", re.IGNORECASE)),
+    ("baseline", re.compile(r"baseline|基线|对手|对比方法|competitor", re.IGNORECASE)),
+    ("gray", re.compile(r"gray|grey|灰|注释", re.IGNORECASE)),
+]
 
 
 def extract_palette_from_profile(profile_path):
@@ -103,29 +121,63 @@ def extract_palette_from_profile(profile_path):
                 section_lines.append(follow)
         break  # 只取第一个命中的调色板章节
 
-    # 第二步：按出现顺序提取色值（去重，避免档案中重复引用同一色值污染角色映射）
-    hex_colors = []
-    for hex_color in HEX_COLOR_RE.findall("\n".join(section_lines)):
-        hex_color = hex_color.upper()
-        if hex_color not in hex_colors:
-            hex_colors.append(hex_color)
+    # 第二步：逐行提取色值，每个色值归属「行内距离最近的角色关键词」
+    # （超过 KEYWORD_DIST_LIMIT 视为无关键词，进入出现顺序兜底——避免"蓝灰主色"这类远距误判）
+    KEYWORD_DIST_LIMIT = 30
+    role_hits = {"ours": [], "baseline": [], "gray": []}
+    fallback_order = []          # 未命中任何关键词的色值，按出现顺序兜底
 
-    if not hex_colors:
+    def add_hit(role, hex_color):
+        if hex_color not in role_hits[role]:
+            role_hits[role].append(hex_color)
+
+    for line in section_lines:
+        keyword_positions = sorted(
+            (m.start(), role) for role, keywords in ROLE_LINE_KEYWORDS for m in keywords.finditer(line)
+        )
+        for hm in HEX_COLOR_RE.finditer(line):
+            hex_color = hm.group(0).upper()
+            if hex_color not in fallback_order:
+                fallback_order.append(hex_color)
+            candidates = [(hm.start() - pos, role) for pos, role in keyword_positions]
+            candidates += [(pos - hm.start(), role) for pos, role in keyword_positions]
+            candidates = [(dist, role) for dist, role in candidates if dist >= 0]
+            if candidates:
+                dist, role = min(candidates)
+                if dist <= KEYWORD_DIST_LIMIT:
+                    add_hit(role, hex_color)
+                    continue
+            # 无关键词或距离过远 -> 兜底序列
+
+    if not fallback_order:
         print(f"[!] 在 {profile_path} 的「调色板」章节中未找到任何 #RRGGBB 色值")
         return None
 
-    # 第三步：按顺序映射角色，缺失项用 kaiming_blue 补足
+    # 第三步：角色映射（关键词命中优先，未命中的按出现顺序补足），缺失项用 kaiming_blue 补足
     colors = dict(PALETTES["kaiming_blue"])
     mapping = {}
-    for role, hex_color in zip(PROFILE_COLOR_ROLES, hex_colors):
-        colors[role] = hex_color
-        mapping[role] = hex_color
+
+    def assign(role_slot, hex_color):
+        if hex_color and hex_color not in mapping.values() and role_slot not in mapping:
+            colors[role_slot] = hex_color
+            mapping[role_slot] = hex_color
+
+    assign("ours", role_hits["ours"][0] if role_hits["ours"] else None)
+    for i, slot in enumerate(["baseline1", "baseline2", "baseline3"]):
+        assign(slot, role_hits["baseline"][i] if i < len(role_hits["baseline"]) else None)
+    assign("gray", role_hits["gray"][0] if role_hits["gray"] else None)
+    remaining = [c for c in fallback_order if c not in mapping.values()]
+    for slot in PROFILE_COLOR_ROLES:
+        if slot not in mapping and remaining:
+            assign(slot, remaining.pop(0))
 
     print(f"[+] 已从学者档案解析调色板 ({profile_path}):")
     for role in PROFILE_COLOR_ROLES:
-        print(f"    {role:<10} -> {colors[role]}" + ("" if role in mapping else "  (档案未提供，沿用 kaiming_blue 默认)"))
-    if len(hex_colors) > len(PROFILE_COLOR_ROLES):
-        print(f"    (档案中还有 {len(hex_colors) - len(PROFILE_COLOR_ROLES)} 个色值未映射: {hex_colors[len(PROFILE_COLOR_ROLES):]})")
+        origin = "关键词命中" if role in mapping and colors[role] in sum(role_hits.values(), []) else ("出现顺序兜底" if role in mapping else "档案未提供，沿用 kaiming_blue 默认")
+        print(f"    {role:<10} -> {colors[role]}  ({origin})")
+    unused = [c for c in fallback_order if c not in mapping.values()]
+    if unused:
+        print(f"    (档案中还有 {len(unused)} 个色值未映射: {unused})")
     return colors
 
 
@@ -179,13 +231,16 @@ def generate_sample_plot(output_path="scholar_benchmark_plot.pdf",
     # 模拟一个典型的 Accuracy vs Compute 曲线
     epochs = np.linspace(1, 100, 20)
     baseline_acc = 70 + 15 * (1 - np.exp(-epochs / 25)) + np.random.normal(0, 0.4, 20)
+    baseline2_acc = 69 + 13 * (1 - np.exp(-epochs / 30)) + np.random.normal(0, 0.4, 20)
     ours_acc = 74 + 17 * (1 - np.exp(-epochs / 18)) + np.random.normal(0, 0.3, 20)
 
     fig, ax = plt.subplots(figsize=(6, 4.2))
 
-    # Baseline: 细线、常规标记
-    ax.plot(epochs, baseline_acc, label="Standard Baseline", color=colors["gray"],
-            linestyle="--", marker="s", markersize=5, linewidth=1.8, alpha=0.8)
+    # Baselines: 虚线/点线退后（学者风格惯例：Ours 实线加粗居上，基线视觉退后）
+    ax.plot(epochs, baseline_acc, label="Baseline A", color=colors["baseline1"],
+            linestyle="--", marker="s", markersize=5, linewidth=1.8, alpha=0.85)
+    ax.plot(epochs, baseline2_acc, label="Baseline B", color=colors["baseline2"],
+            linestyle=":", marker="^", markersize=5, linewidth=1.8, alpha=0.85)
 
     # Ours: 粗线、醒目主色、大标记（用 fontweight 强调，而非 LaTeX \textbf —— 未开启 text.usetex 时会被原样打印）
     ax.plot(epochs, ours_acc, label="Ours",

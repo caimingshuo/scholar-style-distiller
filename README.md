@@ -35,6 +35,10 @@
 → 阶段 7 使用协议（此后每次实战前执行）
 ```
 
+## 实战示例：存晓东风格档案
+
+一条完整流水线的真实产物见 [examples/xiaodong_cun/](examples/xiaodong_cun/)：20 篇语料（2019–2026）→ 20 张 tex:行号级证据卡 → 四维风格档案 → 盲测验证通过（SadTalker 留样）→ 可直接套用的**画图/写作/Idea 应用手册**。想最快感受产出形态，直接看 [style_handbook.md](examples/xiaodong_cun/style_handbook.md)。
+
 ## 安装与使用
 
 把整个文件夹放进任意支持 Agent Skills 的环境（如 `~/.claude/skills/`、`~/.zcode/skills/`），或在对话中直接粘贴 `SKILL.md` 内容。
@@ -64,9 +68,10 @@ references/
   scholar_profile_template.md# 档案模板
 scripts/
   paper_collector.py         # arXiv 批量采集 + 语料报告生成
-  plot_style_template.py     # 风格示例图渲染（--from-profile 读档案色板）
+  plot_style_template.py     # 风格示例图渲染（--from-profile 按角色关键词提取档案色板；内置 matplotlib_classic ≈ 2024+ 主流风格）
 examples/
   kaiming_he_profile.md      # 范例档案
+  xiaodong_cun/              # 完整实战示例（档案 + 应用手册 + 20 张证据卡 + 盲测记录）
 ```
 
 ## 使用边界
