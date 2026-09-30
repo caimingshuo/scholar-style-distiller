@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+scholar_data/
+scholar_profiles/
+test_runs/
+*.pdf
+*.tar.gz
